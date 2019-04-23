@@ -789,9 +789,8 @@ test_mp_print()
 	d = mp_encode_double(d, 3.14);
 	d = mp_encode_uint(d, 100);
 	d = mp_encode_uint(d, 500);
-	*d++ = 0xd4; /* let's pack smallest fixed ext */
-	*d++ = 0;
-	*d++ = 0;
+	/* let's pack zero-length ext */
+	d = mp_encode_ext(d, MP_EXT_DECIMAL, 0);
 	char bin[] = "\x12test\x34\b\t\n\"bla\\-bla\"\f\r";
 	d = mp_encode_bin(d, bin, sizeof(bin));
 	d = mp_encode_map(d, 0);
@@ -800,7 +799,7 @@ test_mp_print()
 	const char *expected =
 		"[-5, 42, \"kill bill\", [], "
 		"{\"bool true\": true, \"bool false\": false, \"null\": null, "
-		"\"float\": 3.14, \"double\": 3.14, 100: 500}, undefined, "
+		"\"float\": 3.14, \"double\": 3.14, 100: 500}, decimal, "
 		"\"\\u0012test4\\b\\t\\n\\\"bla\\\\-bla\\\"\\f\\r\\u0000\", {}]";
 	int esize = strlen(expected);
 

@@ -383,6 +383,13 @@ enum mp_type {
 };
 
 /**
+ * \brief MsgPack extension data types.
+ */
+enum mp_ext_type {
+	MP_EXT_DECIMAL = 0
+};
+
+/**
  * \brief Determine MsgPack type by a first byte \a c of encoded data.
  *
  * Example usage:
@@ -531,6 +538,49 @@ mp_check_map(const char *cur, const char *end);
  */
 MP_PROTO uint32_t
 mp_decode_map(const char **data);
+
+/**
+ * \brief calculate exact buffer size needed to store
+ * ext value of length \a len.
+ * \param len value length in bytes.
+ * \retval buffer size in bytes
+ */
+MP_PROTO uint32_t
+mp_sizeof_ext(uint32_t len);
+
+/**
+ * \brief Encode extension header with \a type and
+ * value length \a len.
+ * The value must be encoded after the header.
+ * \return \a data + \link mp_sizeof_ext() mp_sizeof_ext(size)\endlink
+ */
+MP_PROTO char *
+mp_encode_ext(char *data, uint8_t type, uint32_t len);
+
+/**
+ * \brief Check that \a cur buffer has enough bytes to decode an ext header.
+ * \param cur buffer
+ * \param end end of the buffer
+ * \retval 0 - buffer has enough bytes
+ * \retval > 0 - the numbeer of remaining bytes to read
+ * \pre cur < end
+ * \pre mp_typeof(*cur) == MP_EXT
+ */
+MP_PROTO MP_PURE ptrdiff_t
+mp_check_ext(const char *cur, const char *end);
+
+/**
+ * \brief Decode an extension header from MsgPack \a data.
+ *
+ * The extension type value must be decoded after the header.
+ * \param data - the pointer to a buffer.
+ * \param len -  decoded length of the following value.
+ * \param type - decoded type of the following value.
+ * \retval - the length of the following ext value.
+ * \post *data = *data + mp_sizeof_ext(length)
+ */
+MP_PROTO uint32_t
+mp_decode_ext(const char **data, uint32_t *len, uint8_t *type);
 
 /**
  * \brief Calculate exact buffer size needed to store an integer \a num.
@@ -1326,6 +1376,7 @@ mp_frame_advance(struct mp_frame *frame);
 extern const enum mp_type mp_type_hint[];
 extern const int8_t mp_parser_hint[];
 extern const char *mp_char2escape[];
+extern const uint8_t mp_ext_hint[];
 
 MP_IMPL MP_ALWAYSINLINE enum mp_type
 mp_typeof(const char c)
@@ -1460,6 +1511,79 @@ mp_decode_map(const char **data)
 			mp_unreachable();
 		return c & 0xf;
 	}
+}
+
+MP_IMPL uint32_t
+mp_sizeof_ext(uint32_t len)
+{
+	if (len <= 16) return 2;
+	if (len <= UINT8_MAX) return 3;
+	if (len <= UINT16_MAX) return 4;
+	else return 5;
+}
+
+MP_IMPL char *
+mp_encode_ext(char *data, uint8_t type, uint32_t len)
+{
+	/*
+	 * Only use fixext when length is exactly 1, 2, 4, 8 or 16.
+	 * Otherwise use ext 8 if length <= 255.
+	 */
+	if (len <= 16 && mp_ext_hint[len-1]) {
+		data = mp_store_u8(data, mp_ext_hint[len-1]);
+	} else if (len <= UINT8_MAX) {
+		data = mp_store_u8(data, 0xc7);
+		data = mp_store_u8(data, (uint8_t) len);
+	} else if (len <= UINT16_MAX) {
+		data = mp_store_u8(data, 0xc8);
+		data = mp_store_u16(data, (uint16_t) len);
+	} else {
+		data = mp_store_u8(data, 0xc9);
+		data = mp_store_u32(data,len);
+	}
+	data = mp_store_u8(data, type);
+	return data;
+}
+
+MP_IMPL ptrdiff_t
+mp_check_ext(const char *cur, const char *end)
+{
+	assert(cur < end);
+	assert(mp_typeof(*cur) == MP_EXT);
+	uint8_t c = mp_load_u8(&cur);
+	if (c & 0xf0 == 0xd0) {
+		return 1 - (end - cur);
+	}
+
+	assert(c >= 0xc7 && c <= 0xc9);
+	return 1 << (c - 0xc7) + 1 - (end - cur); /* 0xc7 -> 2, 0xc8 -> 3, 0xc9 ->5 */
+}
+
+MP_IMPL uint32_t
+mp_decode_ext(const char **data, uint32_t *len, uint8_t *type) {
+	uint8_t c = mp_load_u8(data);
+	switch 	 (c) {
+	case 0xd4:
+	case 0xd5:
+	case 0xd6:
+	case 0xd7:
+	case 0xd8:
+		*len = 1u << (c - 0xd4);
+		break;
+	case 0xc7:
+		*len = mp_load_u8(data);
+		break;
+	case 0xc8:
+		*len = mp_load_u16(data);
+		break;
+	case 0xc9:
+		*len = mp_load_u32(data);
+		break;
+	default:
+		mp_unreachable();
+	}
+	*type = mp_load_u8(data);
+	return *len;
 }
 
 MP_IMPL uint32_t

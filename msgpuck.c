@@ -33,6 +33,17 @@
 #define MP_LIBRARY 1
 #include "msgpuck.h"
 
+const char *
+mp_ext_type_str(enum mp_ext_type type)
+{
+	switch(type) {
+	case MP_EXT_DECIMAL:
+		return "decimal";
+	default:
+		return "undefined";
+	}
+}
+
 size_t
 mp_vformat(char *data, size_t data_size, const char *format, va_list vl)
 {
@@ -298,9 +309,14 @@ next:										\
 		PRINTF("%lg", mp_decode_double(&data));				\
 		break;								\
 	case MP_EXT:								\
-		mp_next(&data);							\
-		PRINTF("undefined");						\
+	{									\
+		uint8_t type;							\
+		uint32_t len;							\
+		len = mp_decode_ext(&data, &len, &type);			\
+		PRINTF("%s", mp_ext_type_str(type));	    			\
+		data += len;							\
 		break;								\
+	}									\
 	default:								\
 		mp_unreachable();						\
 		return -1;							\
